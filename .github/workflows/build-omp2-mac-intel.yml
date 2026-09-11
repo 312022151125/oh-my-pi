@@ -1,0 +1,117 @@
+name: Build OMP2 macOS Intel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-intel:
+    name: Build OMP2 macOS Intel
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout OMP2
+        uses: actions/checkout@v4
+        with:
+          repository: can1357/oh-my-pi
+          ref: omp2
+          fetch-depth: 1
+
+      - name: Confirm Intel runner
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "x86_64"
+          sw_vers
+
+      - name: Select pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rustup show active-toolchain
+          rustc -Vv
+          cargo -V
+
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          brew install lld uv zstd ninja
+
+      - name: Cache embedded Python
+        id: python-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/python
+            vendor/python-release
+          key: omp2-python-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/py/scripts/fetch-python.sh', 'crates/py/scripts/pack-pymodules.py', 'crates/py/scripts/gen-py-notices.py', 'crates/py/requirements.txt') }}
+
+      - name: Prepare embedded Python
+        if: steps.python-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          crates/py/scripts/fetch-python.sh
+
+      - name: Verify embedded Python toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f vendor/python/pyo3-config.txt
+          crates/py/scripts/ld64.lld --version
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: omp2-cargo-macos-intel-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            omp2-cargo-macos-intel-
+
+      - name: Build release binary
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+        run: |
+          set -euxo pipefail
+          cargo build --release --locked -p omp-app --bin omp
+
+      - name: Verify binary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BIN="target/release/omp"
+          test -x "$BIN"
+
+          file "$BIN"
+          file "$BIN" | grep -Eq 'Mach-O 64-bit executable x86_64|Mach-O 64-bit executable x86_64'
+
+          # Ad-hoc sign so the downloaded standalone executable has a valid
+          # local code signature. This is not Apple Developer ID notarization.
+          codesign --force --sign - "$BIN"
+          codesign --verify --strict --verbose=2 "$BIN"
+
+          "$BIN" --version
+
+          cp "$BIN" omp-darwin-x64
+          chmod +x omp-darwin-x64
+          shasum -a 256 omp-darwin-x64 > omp-darwin-x64.sha256
+
+      - name: Upload macOS Intel binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: omp2-darwin-x64
+          path: |
+            omp-darwin-x64
+            omp-darwin-x64.sha256
+          if-no-files-found: error
+          retention-days: 14
