@@ -1,4 +1,4 @@
-name: Build OMP2 macOS Intel v5
+name: Build OMP2 macOS Intel v6
 
 on:
   workflow_dispatch:
@@ -23,6 +23,10 @@ jobs:
       # Keep Opus self-contained in the binary rather than accidentally
       # linking a Homebrew pkg-config result that may not exist on the user's Mac.
       OPUS_NO_PKG: "1"
+
+      # Keep reusable object files so a failed build does not require compiling
+      # the whole workspace from zero on the next run.
+      CARGO_INCREMENTAL: "1"
 
     steps:
       - name: Checkout OMP2
@@ -86,7 +90,29 @@ jobs:
 
           '''
               s = s.replace(anchor, case + anchor, 1)
-              p.write_text(s)
+
+          # macOS runners still execute this script with Apple's Bash 3.2.
+          # Bash 3.2 mis-parses the command substitution containing `case`
+          # inside the heredoc and writes a corrupt build_flags value.
+          old_flags = '''build_flags=$(case "$LIB_NAME" in *td) echo "Py_DEBUG,Py_GIL_DISABLED";; *) echo "Py_GIL_DISABLED";; esac)'''
+          if old_flags in s:
+              replacement = '''build_flags=${BUILD_FLAGS}'''
+              s = s.replace(old_flags, replacement, 1)
+
+              marker = '''echo "generating ${VENDOR_NAME}/pyo3-config.txt..." >&2'''
+              if marker not in s:
+                  raise SystemExit("pyo3 config marker not found; upstream layout changed")
+
+              setup = '''local BUILD_FLAGS
+          case "$LIB_NAME" in
+          *td) BUILD_FLAGS="Py_DEBUG,Py_GIL_DISABLED" ;;
+          *) BUILD_FLAGS="Py_GIL_DISABLED" ;;
+          esac
+
+          '''
+              s = s.replace(marker, setup + marker, 1)
+
+          p.write_text(s)
           PY
 
           chmod +x crates/py/scripts/fetch-python.sh
@@ -113,7 +139,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/python
-          key: omp2-v5-python-3.14.7-20260807-darwin-x64-debug
+          key: omp2-v6-python-3.14.7-20260807-darwin-x64-debug
 
       - name: Fetch embedded Python
         if: steps.python-cache.outputs.cache-hit != 'true'
@@ -141,6 +167,11 @@ jobs:
           echo "=== pyo3 config ==="
           cat vendor/python/pyo3-config.txt
 
+          # This is the exact corruption that caused v5 to fail in pyo3-ffi.
+          grep -Fx 'build_flags=Py_DEBUG,Py_GIL_DISABLED'             vendor/python/pyo3-config.txt
+          ! grep -F 'echo "Py_DEBUG' vendor/python/pyo3-config.txt
+          ! grep -F ';; esac' vendor/python/pyo3-config.txt
+
           PY="$(awk -F= '$1=="executable" {print substr($0, index($0,"=")+1)}' vendor/python/pyo3-config.txt)"
           test -x "$PY"
           file "$PY"
@@ -155,9 +186,18 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: omp2-v5-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+          key: omp2-v6-cargo-downloads-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            omp2-v5-cargo-downloads-
+            omp2-v6-cargo-downloads-
+
+      - name: Restore compiled target cache
+        id: target-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: target
+          key: omp2-v6-target-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}-pydebug
+          restore-keys: |
+            omp2-v6-target-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build Intel release (vendored static Opus)
         id: cargo-build
@@ -204,10 +244,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v5-build-log
+          name: omp2-darwin-x64-v6-build-log
           path: ci-logs/
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Save compiled target cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: target
+          key: omp2-v6-target-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}-pydebug
 
       - name: Verify Intel binary
         shell: bash
@@ -248,7 +295,7 @@ jobs:
           (
             cd dist
             shasum -a 256 omp-darwin-x64 > omp-darwin-x64.sha256
-            tar -czf omp2-darwin-x64-v5.tar.gz \
+            tar -czf omp2-darwin-x64-v6.tar.gz \
               omp-darwin-x64 \
               omp-darwin-x64.sha256
           )
@@ -259,11 +306,11 @@ jobs:
       - name: Upload Intel binary
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v5
+          name: omp2-darwin-x64-v6
           path: |
             dist/omp-darwin-x64
             dist/omp-darwin-x64.sha256
-            dist/omp2-darwin-x64-v5.tar.gz
+            dist/omp2-darwin-x64-v6.tar.gz
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
