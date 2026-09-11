@@ -1,4 +1,4 @@
-name: Build OMP2 macOS Intel v7
+name: Build OMP2 macOS Intel v8 final-size
 
 on:
   workflow_dispatch:
@@ -8,24 +8,14 @@ permissions:
 
 jobs:
   build:
-    name: OMP2 macOS Intel x86_64
+    name: OMP2 macOS Intel optimized x86_64
     runs-on: macos-15-intel
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
-
-      # audiopus_sys 0.2.2 vendors an old Opus CMakeLists.
-      # CMake 4.x removed compatibility below 3.5, so configure the minimum
-      # policy version explicitly. Newer upstream OMP uses the same override.
       CMAKE_POLICY_VERSION_MINIMUM: "3.5"
-
-      # Keep Opus self-contained in the binary rather than accidentally
-      # linking a Homebrew pkg-config result that may not exist on the user's Mac.
       OPUS_NO_PKG: "1"
-
-      # Keep reusable object files so a failed build does not require compiling
-      # the whole workspace from zero on the next run.
       CARGO_INCREMENTAL: "1"
 
     steps:
@@ -44,7 +34,6 @@ jobs:
           test "$(uname -m)" = "x86_64"
           sw_vers
           xcodebuild -version
-          xcrun --show-sdk-path
           rustc -Vv
           cargo -V
 
@@ -56,19 +45,11 @@ jobs:
 
           LLD22="$(brew --prefix lld@22)/bin/ld64.lld"
           test -x "$LLD22"
-          "$LLD22" --version
-          "$LLD22" --version | grep -q 'LLD 22\.'
-
+          "$LLD22" --version | tee /tmp/lld-version.txt
+          grep -q 'LLD 22\.' /tmp/lld-version.txt
           echo "LLD22=$LLD22" >> "$GITHUB_ENV"
 
-      # omp2 currently supports Darwin arm64 and Linux x86_64 in this script,
-      # but python-build-standalone publishes the matching Darwin x86_64 tree.
-      #
-      # Deliberately create ONLY the non-LTO debug Python tree here.
-      # Rust itself is still compiled with Cargo's release profile.
-      # This avoids the unsupported Intel PGO+LTO/bitcode path while getting
-      # a usable native Intel binary first.
-      - name: Add Darwin x86_64 embedded Python
+      - name: Patch OMP2 for production Intel Python
         shell: bash
         run: |
           set -euxo pipefail
@@ -76,28 +57,25 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path("crates/py/scripts/fetch-python.sh")
-          s = p.read_text()
+          fetch = Path("crates/py/scripts/fetch-python.sh")
+          s = fetch.read_text()
 
           if "Darwin:x86_64)" not in s:
               anchor = "Linux:x86_64)"
               if anchor not in s:
                   raise SystemExit("Linux:x86_64 case not found; upstream layout changed")
 
-              case = '''Darwin:x86_64)
+              intel = '''Darwin:x86_64)
           prepare_tree "x86_64-apple-darwin" "freethreaded+debug" "python" "0"
+          prepare_tree "x86_64-apple-darwin" "freethreaded+pgo+lto" "python-release" "1"
           ;;
 
           '''
-              s = s.replace(anchor, case + anchor, 1)
+              s = s.replace(anchor, intel + anchor, 1)
 
-          # macOS runners still execute this script with Apple's Bash 3.2.
-          # Bash 3.2 mis-parses the command substitution containing `case`
-          # inside the heredoc and writes a corrupt build_flags value.
           old_flags = '''build_flags=$(case "$LIB_NAME" in *td) echo "Py_DEBUG,Py_GIL_DISABLED";; *) echo "Py_GIL_DISABLED";; esac)'''
           if old_flags in s:
-              replacement = '''build_flags=${BUILD_FLAGS}'''
-              s = s.replace(old_flags, replacement, 1)
+              s = s.replace(old_flags, "build_flags=${BUILD_FLAGS}", 1)
 
               marker = '''echo "generating ${VENDOR_NAME}/pyo3-config.txt..." >&2'''
               if marker not in s:
@@ -112,34 +90,59 @@ jobs:
           '''
               s = s.replace(marker, setup + marker, 1)
 
-          p.write_text(s)
+          fetch.write_text(s)
+
+          shim = Path("crates/py/scripts/ld64.lld")
+          t = shim.read_text()
+          replacement = 'LLD="$(brew --prefix lld@22)/bin/ld64.lld"'
+
+          candidates = (
+              "LLD=/opt/homebrew/opt/lld/bin/ld64.lld",
+              'LLD="/opt/homebrew/opt/lld/bin/ld64.lld"',
+              "LLD=/usr/local/opt/lld/bin/ld64.lld",
+              'LLD="/usr/local/opt/lld/bin/ld64.lld"',
+          )
+
+          if replacement not in t:
+              for old in candidates:
+                  if old in t:
+                      t = t.replace(old, replacement, 1)
+                      break
+              else:
+                  raise SystemExit("Unexpected ld64.lld layout; upstream changed")
+
+          shim.write_text(t)
           PY
 
-          chmod +x crates/py/scripts/fetch-python.sh
-          git diff --check
-          git diff -- crates/py/scripts/fetch-python.sh
+          chmod +x \
+            crates/py/scripts/fetch-python.sh \
+            crates/py/scripts/ld64.lld
 
-      - name: Configure explicit Intel target and linker
+          git diff --check
+          git diff -- \
+            crates/py/scripts/fetch-python.sh \
+            crates/py/scripts/ld64.lld
+
+      - name: Configure Intel release target
         shell: bash
         run: |
           set -euxo pipefail
-
           rustup target add x86_64-apple-darwin
 
-          # OMP upstream routes the huge statically-linked CPython image through
-          # lld on its supported macOS target. Do the same for Intel explicitly.
           echo "CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=--ld-path=${LLD22} -Z threads=8" \
             >> "$GITHUB_ENV"
 
-          echo "PYO3_CONFIG_FILE=${GITHUB_WORKSPACE}/vendor/python/pyo3-config.txt" \
+          echo "PYO3_CONFIG_FILE=${GITHUB_WORKSPACE}/vendor/python-release/pyo3-config.txt" \
             >> "$GITHUB_ENV"
 
-      - name: Cache Intel embedded Python
+      - name: Cache production embedded Python
         id: python-cache
         uses: actions/cache@v4
         with:
-          path: vendor/python
-          key: omp2-v7-python-3.14.7-20260807-darwin-x64-debug
+          path: |
+            vendor/python
+            vendor/python-release
+          key: omp2-v8-python-3.14.7-20260807-darwin-x64-pgo-lto
 
       - name: Fetch embedded Python
         if: steps.python-cache.outputs.cache-hit != 'true'
@@ -148,37 +151,30 @@ jobs:
           set -euxo pipefail
           crates/py/scripts/fetch-python.sh
 
-      - name: Verify embedded Python
+      - name: Verify production Python
         shell: bash
         run: |
           set -euxo pipefail
 
-          test -f vendor/python/pyo3-config.txt
-          test -f vendor/python/PYTHON.json
-          test -f vendor/python/stdlib.bin
-          test ! -f vendor/python/needs-lld
+          test -f vendor/python-release/pyo3-config.txt
+          test -f vendor/python-release/PYTHON.json
+          test -f vendor/python-release/stdlib.bin
+          test -f vendor/python-release/needs-lld
 
-          echo "=== archive ==="
-          cat vendor/python/.archive.stamp
+          cat vendor/python-release/.archive.stamp
           grep -F \
-            "cpython-3.14.7+20260807-x86_64-apple-darwin-freethreaded+debug-full" \
-            vendor/python/.archive.stamp
+            "cpython-3.14.7+20260807-x86_64-apple-darwin-freethreaded+pgo+lto-full" \
+            vendor/python-release/.archive.stamp
 
-          echo "=== pyo3 config ==="
-          cat vendor/python/pyo3-config.txt
+          cat vendor/python-release/pyo3-config.txt
+          grep -Fx 'build_flags=Py_GIL_DISABLED' \
+            vendor/python-release/pyo3-config.txt
+          ! grep -F 'Py_DEBUG' vendor/python-release/pyo3-config.txt
+          ! grep -F ';; esac' vendor/python-release/pyo3-config.txt
 
-          # This is the exact corruption that caused v5 to fail in pyo3-ffi.
-          grep -Fx 'build_flags=Py_DEBUG,Py_GIL_DISABLED'             vendor/python/pyo3-config.txt
-          ! grep -F 'echo "Py_DEBUG' vendor/python/pyo3-config.txt
-          ! grep -F ';; esac' vendor/python/pyo3-config.txt
+          crates/py/scripts/ld64.lld --version 2>&1 | tee /tmp/shim-version.txt
+          grep -q 'LLD 22\.' /tmp/shim-version.txt
 
-          PY="$(awk -F= '$1=="executable" {print substr($0, index($0,"=")+1)}' vendor/python/pyo3-config.txt)"
-          test -x "$PY"
-          file "$PY"
-          "$PY" --version
-
-      # Cache registries only. Do NOT reuse target/ from earlier failed
-      # ARM/Intel/PGO-LTO attempts.
       - name: Cache Cargo downloads
         uses: actions/cache@v4
         with:
@@ -186,132 +182,147 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: omp2-v7-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+          key: omp2-v8-cargo-downloads-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            omp2-v7-cargo-downloads-
+            omp2-v8-cargo-downloads-
+            omp2-v6-cargo-downloads-
 
-      - name: Restore compiled target cache
-        id: target-cache
+      - name: Restore optimized target cache
         uses: actions/cache/restore@v4
         with:
           path: target
-          key: omp2-v7-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-release-dev-pydebug
+          key: omp2-v8-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
           restore-keys: |
-            omp2-v7-target-${{ runner.os }}-${{ runner.arch }}-
+            omp2-v8-target-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Build Intel release-dev (16 codegen units)
+      - name: Build production release
         id: cargo-build
         shell: bash
         run: |
           set -uo pipefail
-
           mkdir -p ci-logs
 
           {
-            echo "=== build environment ==="
+            echo "=== production build ==="
             echo "uname: $(uname -a)"
+            echo "PYO3_CONFIG_FILE=$PYO3_CONFIG_FILE"
             echo "CMAKE_POLICY_VERSION_MINIMUM=$CMAKE_POLICY_VERSION_MINIMUM"
             echo "OPUS_NO_PKG=$OPUS_NO_PKG"
-            echo "cmake: $(cmake --version | head -1)"
-            echo "LLD22: $LLD22"
+            echo "RUSTFLAGS=$CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS"
             "$LLD22" --version
-            echo "PYO3_CONFIG_FILE=$PYO3_CONFIG_FILE"
-            echo "CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS=$CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS"
-            echo "Cargo profile: release-dev (inherits release, codegen-units=16)"
-            echo
           } | tee ci-logs/environment.txt
 
           set +e
           cargo build \
-            --profile release-dev \
+            --release \
             --locked \
             --target x86_64-apple-darwin \
             -p omp-app \
             --bin omp \
             2>&1 | tee ci-logs/cargo-build.log
-
           STATUS=${PIPESTATUS[0]}
           set -e
 
           echo "cargo_status=$STATUS" >> "$GITHUB_OUTPUT"
+          exit "$STATUS"
 
-          if [ "$STATUS" -ne 0 ]; then
-            echo "Cargo build failed with status $STATUS"
-            exit "$STATUS"
-          fi
-
-      # Always upload the diagnostic log, even when Cargo fails.
-      - name: Upload build diagnostics
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v7-build-log
+          name: omp2-darwin-x64-v8-build-log
           path: ci-logs/
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Save compiled target cache
+      - name: Save optimized target cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: target
-          key: omp2-v7-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-release-dev-pydebug
+          key: omp2-v8-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
 
-      - name: Verify Intel binary
+      - name: Optimize and verify binary
         shell: bash
         run: |
           set -euxo pipefail
 
-          BIN="target/x86_64-apple-darwin/release-dev/omp"
-          test -x "$BIN"
+          SRC="target/x86_64-apple-darwin/release/omp"
+          test -x "$SRC"
 
-          echo "=== binary ==="
+          mkdir -p dist
+          cp "$SRC" dist/omp-darwin-x64
+          BIN="dist/omp-darwin-x64"
+
+          BEFORE="$(stat -f%z "$BIN")"
+
+          echo "=== before final strip ==="
+          ls -lh "$BIN"
           file "$BIN"
           lipo -archs "$BIN"
 
           file "$BIN" | grep -q "Mach-O 64-bit executable x86_64"
           lipo -archs "$BIN" | grep -Eq '(^|[[:space:]])x86_64($|[[:space:]])'
 
-          echo "=== linked libraries ==="
-          otool -L "$BIN"
+          # Safe Mach-O stripping: keep global CPython exports required by
+          # native Python extensions.
+          /usr/bin/strip -S -x "$BIN"
 
-          echo "=== smoke test ==="
+          AFTER="$(stat -f%z "$BIN")"
+
+          echo "=== after final safe strip ==="
+          ls -lh "$BIN"
+
+          codesign --force --sign - "$BIN"
+          codesign --verify --strict --verbose=2 "$BIN"
+
           "$BIN" --version
 
-      - name: Sign and package
+          {
+            echo "before_bytes=$BEFORE"
+            echo "after_bytes=$AFTER"
+            echo "saved_bytes=$((BEFORE - AFTER))"
+            echo "before_mib=$(awk -v n="$BEFORE" 'BEGIN {printf "%.2f", n/1048576}')"
+            echo "after_mib=$(awk -v n="$AFTER" 'BEGIN {printf "%.2f", n/1048576}')"
+            echo "saved_mib=$(awk -v n="$((BEFORE - AFTER))" 'BEGIN {printf "%.2f", n/1048576}')"
+            echo
+            echo "=== linked libraries ==="
+            otool -L "$BIN"
+          } | tee dist/size-report.txt
+
+          shasum -a 256 "$BIN" > dist/omp-darwin-x64.sha256
+
+      - name: Create compressed distribution
         shell: bash
         run: |
           set -euxo pipefail
 
-          BIN="target/x86_64-apple-darwin/release-dev/omp"
-
-          # Ad-hoc local signature; not Developer-ID notarization.
-          codesign --force --sign - "$BIN"
-          codesign --verify --strict --verbose=2 "$BIN"
-
-          mkdir -p dist
-          cp "$BIN" dist/omp-darwin-x64
-          chmod +x dist/omp-darwin-x64
-
           (
             cd dist
-            shasum -a 256 omp-darwin-x64 > omp-darwin-x64.sha256
-            tar -czf omp2-darwin-x64-v7.tar.gz \
+
+            tar -cf - \
               omp-darwin-x64 \
-              omp-darwin-x64.sha256
+              omp-darwin-x64.sha256 \
+              size-report.txt \
+              | zstd -19 -T0 -o omp2-darwin-x64-v8.tar.zst
+
+            shasum -a 256 omp2-darwin-x64-v8.tar.zst \
+              > omp2-darwin-x64-v8.tar.zst.sha256
+
+            ls -lh \
+              omp-darwin-x64 \
+              omp2-darwin-x64-v8.tar.zst \
+              size-report.txt
           )
 
-          ls -lh dist/
-          cat dist/omp-darwin-x64.sha256
-
-      - name: Upload Intel binary
+      - name: Upload optimized Intel package
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v7
+          name: omp2-darwin-x64-v8-optimized
           path: |
-            dist/omp-darwin-x64
-            dist/omp-darwin-x64.sha256
-            dist/omp2-darwin-x64-v7.tar.gz
+            dist/omp2-darwin-x64-v8.tar.zst
+            dist/omp2-darwin-x64-v8.tar.zst.sha256
+            dist/size-report.txt
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
