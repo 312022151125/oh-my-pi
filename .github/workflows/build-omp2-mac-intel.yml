@@ -1,4 +1,4 @@
-name: Build OMP2 macOS Intel v8 final-size
+name: Build OMP2 macOS Intel v9 portable
 
 on:
   workflow_dispatch:
@@ -16,6 +16,12 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       CMAKE_POLICY_VERSION_MINIMUM: "3.5"
       OPUS_NO_PKG: "1"
+
+      # Upstream OMP release policy: never pick up host/Homebrew PCRE2.
+      # Otherwise /usr/local or /opt/homebrew install names can leak into
+      # the shipped Mach-O executable.
+      PCRE2_SYS_STATIC: "1"
+
       CARGO_INCREMENTAL: "1"
 
     steps:
@@ -142,7 +148,7 @@ jobs:
           path: |
             vendor/python
             vendor/python-release
-          key: omp2-v8-python-3.14.7-20260807-darwin-x64-pgo-lto
+          key: omp2-v9-python-3.14.7-20260807-darwin-x64-pgo-lto
 
       - name: Fetch embedded Python
         if: steps.python-cache.outputs.cache-hit != 'true'
@@ -182,18 +188,18 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: omp2-v8-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+          key: omp2-v9-cargo-downloads-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            omp2-v8-cargo-downloads-
+            omp2-v9-cargo-downloads-
             omp2-v6-cargo-downloads-
 
       - name: Restore optimized target cache
         uses: actions/cache/restore@v4
         with:
           path: target
-          key: omp2-v8-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
+          key: omp2-v9-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
           restore-keys: |
-            omp2-v8-target-${{ runner.os }}-${{ runner.arch }}-
+            omp2-v9-target-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build production release
         id: cargo-build
@@ -208,6 +214,7 @@ jobs:
             echo "PYO3_CONFIG_FILE=$PYO3_CONFIG_FILE"
             echo "CMAKE_POLICY_VERSION_MINIMUM=$CMAKE_POLICY_VERSION_MINIMUM"
             echo "OPUS_NO_PKG=$OPUS_NO_PKG"
+            echo "PCRE2_SYS_STATIC=$PCRE2_SYS_STATIC"
             echo "RUSTFLAGS=$CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS"
             "$LLD22" --version
           } | tee ci-logs/environment.txt
@@ -230,7 +237,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v8-build-log
+          name: omp2-darwin-x64-v9-build-log
           path: ci-logs/
           if-no-files-found: warn
           retention-days: 14
@@ -240,7 +247,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: target
-          key: omp2-v8-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
+          key: omp2-v9-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
 
       - name: Optimize and verify binary
         shell: bash
@@ -290,6 +297,20 @@ jobs:
             otool -L "$BIN"
           } | tee dist/size-report.txt
 
+          echo "=== portability gate ==="
+          OTOOL="$(otool -L "$BIN")"
+          echo "$OTOOL"
+
+          if echo "$OTOOL" | grep -Eq '/usr/local/opt/|/opt/homebrew/'; then
+            echo "ERROR: non-portable Homebrew dylib dependency detected"
+            exit 1
+          fi
+
+          if echo "$OTOOL" | grep -q 'libpcre2'; then
+            echo "ERROR: PCRE2 is still dynamically linked; expected static PCRE2"
+            exit 1
+          fi
+
           shasum -a 256 "$BIN" > dist/omp-darwin-x64.sha256
 
       - name: Create compressed distribution
@@ -304,24 +325,24 @@ jobs:
               omp-darwin-x64 \
               omp-darwin-x64.sha256 \
               size-report.txt \
-              | zstd -19 -T0 -o omp2-darwin-x64-v8.tar.zst
+              | zstd -19 -T0 -o omp2-darwin-x64-v9.tar.zst
 
-            shasum -a 256 omp2-darwin-x64-v8.tar.zst \
-              > omp2-darwin-x64-v8.tar.zst.sha256
+            shasum -a 256 omp2-darwin-x64-v9.tar.zst \
+              > omp2-darwin-x64-v9.tar.zst.sha256
 
             ls -lh \
               omp-darwin-x64 \
-              omp2-darwin-x64-v8.tar.zst \
+              omp2-darwin-x64-v9.tar.zst \
               size-report.txt
           )
 
       - name: Upload optimized Intel package
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v8-optimized
+          name: omp2-darwin-x64-v9-portable
           path: |
-            dist/omp2-darwin-x64-v8.tar.zst
-            dist/omp2-darwin-x64-v8.tar.zst.sha256
+            dist/omp2-darwin-x64-v9.tar.zst
+            dist/omp2-darwin-x64-v9.tar.zst.sha256
             dist/size-report.txt
           if-no-files-found: error
           retention-days: 14
