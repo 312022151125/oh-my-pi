@@ -1,4 +1,4 @@
-name: Build OMP2 macOS Intel v9 portable
+name: Build OMP2 macOS Intel v10 cached
 
 on:
   workflow_dispatch:
@@ -148,7 +148,9 @@ jobs:
           path: |
             vendor/python
             vendor/python-release
-          key: omp2-v9-python-3.14.7-20260807-darwin-x64-pgo-lto
+          key: omp2-python-3.14.7-20260807-darwin-x64-pgo-lto
+          restore-keys: |
+            omp2-v9-python-3.14.7-20260807-darwin-x64-pgo-lto
 
       - name: Fetch embedded Python
         if: steps.python-cache.outputs.cache-hit != 'true'
@@ -188,17 +190,22 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: omp2-v9-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+          key: omp2-cargo-downloads-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            omp2-v9-cargo-downloads-
-            omp2-v6-cargo-downloads-
+            omp2-v9-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+            omp2-v8-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+            omp2-v6-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+            omp2-cargo-downloads-
 
-      - name: Restore optimized target cache
+      - name: Restore progressive target cache
+        id: target-cache
         uses: actions/cache/restore@v4
         with:
           path: target
-          key: omp2-v9-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
+          key: omp2-v10-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            omp2-v10-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto-
+            omp2-v9-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
             omp2-v9-target-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build production release
@@ -215,6 +222,7 @@ jobs:
             echo "CMAKE_POLICY_VERSION_MINIMUM=$CMAKE_POLICY_VERSION_MINIMUM"
             echo "OPUS_NO_PKG=$OPUS_NO_PKG"
             echo "PCRE2_SYS_STATIC=$PCRE2_SYS_STATIC"
+            echo "target_cache_matched_key=${{ steps.target-cache.outputs.cache-matched-key }}"
             echo "RUSTFLAGS=$CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS"
             "$LLD22" --version
           } | tee ci-logs/environment.txt
@@ -237,17 +245,25 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v9-build-log
+          name: omp2-darwin-x64-v10-build-log
           path: ci-logs/
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Save optimized target cache
+      - name: Show target cache size
+        if: always()
+        shell: bash
+        run: |
+          echo "=== target cache ==="
+          du -sh target 2>/dev/null || true
+          du -sh target/x86_64-apple-darwin/release 2>/dev/null || true
+
+      - name: Save progressive target cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: target
-          key: omp2-v9-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto
+          key: omp2-v10-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-pgo-lto-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Optimize and verify binary
         shell: bash
@@ -325,24 +341,24 @@ jobs:
               omp-darwin-x64 \
               omp-darwin-x64.sha256 \
               size-report.txt \
-              | zstd -19 -T0 -o omp2-darwin-x64-v9.tar.zst
+              | zstd -19 -T0 -o omp2-darwin-x64-v10.tar.zst
 
-            shasum -a 256 omp2-darwin-x64-v9.tar.zst \
-              > omp2-darwin-x64-v9.tar.zst.sha256
+            shasum -a 256 omp2-darwin-x64-v10.tar.zst \
+              > omp2-darwin-x64-v10.tar.zst.sha256
 
             ls -lh \
               omp-darwin-x64 \
-              omp2-darwin-x64-v9.tar.zst \
+              omp2-darwin-x64-v10.tar.zst \
               size-report.txt
           )
 
       - name: Upload optimized Intel package
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v9-portable
+          name: omp2-darwin-x64-v10-cached-portable
           path: |
-            dist/omp2-darwin-x64-v9.tar.zst
-            dist/omp2-darwin-x64-v9.tar.zst.sha256
+            dist/omp2-darwin-x64-v10.tar.zst
+            dist/omp2-darwin-x64-v10.tar.zst.sha256
             dist/size-report.txt
           if-no-files-found: error
           retention-days: 14
