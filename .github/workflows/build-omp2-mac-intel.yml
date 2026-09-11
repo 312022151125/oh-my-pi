@@ -1,4 +1,4 @@
-name: Build OMP2 macOS Intel v4
+name: Build OMP2 macOS Intel v5
 
 on:
   workflow_dispatch:
@@ -14,6 +14,15 @@ jobs:
 
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
+
+      # audiopus_sys 0.2.2 vendors an old Opus CMakeLists.
+      # CMake 4.x removed compatibility below 3.5, so configure the minimum
+      # policy version explicitly. Newer upstream OMP uses the same override.
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
+      # Keep Opus self-contained in the binary rather than accidentally
+      # linking a Homebrew pkg-config result that may not exist on the user's Mac.
+      OPUS_NO_PKG: "1"
 
     steps:
       - name: Checkout OMP2
@@ -104,7 +113,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/python
-          key: omp2-v4-python-3.14.7-20260807-darwin-x64-debug
+          key: omp2-v5-python-3.14.7-20260807-darwin-x64-debug
 
       - name: Fetch embedded Python
         if: steps.python-cache.outputs.cache-hit != 'true'
@@ -146,11 +155,11 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: omp2-v4-cargo-downloads-${{ hashFiles('Cargo.lock') }}
+          key: omp2-v5-cargo-downloads-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            omp2-v4-cargo-downloads-
+            omp2-v5-cargo-downloads-
 
-      - name: Build Intel release
+      - name: Build Intel release (vendored static Opus)
         id: cargo-build
         shell: bash
         run: |
@@ -161,6 +170,9 @@ jobs:
           {
             echo "=== build environment ==="
             echo "uname: $(uname -a)"
+            echo "CMAKE_POLICY_VERSION_MINIMUM=$CMAKE_POLICY_VERSION_MINIMUM"
+            echo "OPUS_NO_PKG=$OPUS_NO_PKG"
+            echo "cmake: $(cmake --version | head -1)"
             echo "LLD22: $LLD22"
             "$LLD22" --version
             echo "PYO3_CONFIG_FILE=$PYO3_CONFIG_FILE"
@@ -192,7 +204,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v4-build-log
+          name: omp2-darwin-x64-v5-build-log
           path: ci-logs/
           if-no-files-found: warn
           retention-days: 14
@@ -236,7 +248,7 @@ jobs:
           (
             cd dist
             shasum -a 256 omp-darwin-x64 > omp-darwin-x64.sha256
-            tar -czf omp2-darwin-x64-v4.tar.gz \
+            tar -czf omp2-darwin-x64-v5.tar.gz \
               omp-darwin-x64 \
               omp-darwin-x64.sha256
           )
@@ -247,11 +259,11 @@ jobs:
       - name: Upload Intel binary
         uses: actions/upload-artifact@v4
         with:
-          name: omp2-darwin-x64-v4
+          name: omp2-darwin-x64-v5
           path: |
             dist/omp-darwin-x64
             dist/omp-darwin-x64.sha256
-            dist/omp2-darwin-x64-v4.tar.gz
+            dist/omp2-darwin-x64-v5.tar.gz
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
