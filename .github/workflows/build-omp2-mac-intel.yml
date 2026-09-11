@@ -8,9 +8,9 @@ permissions:
 
 jobs:
   build-macos-intel:
-    name: Build OMP2 macOS Intel
+    name: Build OMP2 macOS Intel (x86_64)
     runs-on: macos-15-intel
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout OMP2
@@ -27,12 +27,6 @@ jobs:
           test "$(uname -s)" = "Darwin"
           test "$(uname -m)" = "x86_64"
           sw_vers
-
-      - name: Select pinned Rust toolchain
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rustup show active-toolchain
           rustc -Vv
           cargo -V
 
@@ -41,6 +35,68 @@ jobs:
         run: |
           set -euxo pipefail
           brew install lld uv zstd ninja
+          echo "Homebrew: $(brew --prefix)"
+          echo "LLD:      $(brew --prefix lld)/bin/ld64.lld"
+          "$(brew --prefix lld)/bin/ld64.lld" --version
+
+      # OMP2 upstream currently only configures embedded Python for:
+      #   Darwin arm64
+      #   Linux x86_64
+      # python-build-standalone DOES publish matching Darwin x86_64 archives,
+      # so add the missing native Intel case locally.
+      #
+      # Upstream's ld64 shim also hard-codes /opt/homebrew (Apple Silicon).
+      # Make it use Homebrew's actual prefix so it also works on Intel (/usr/local).
+      - name: Patch OMP2 for macOS Intel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          fetch = Path("crates/py/scripts/fetch-python.sh")
+          s = fetch.read_text()
+
+          if "Darwin:x86_64)" not in s:
+              anchor = "Linux:x86_64)"
+              if anchor not in s:
+                  raise SystemExit("Could not find Linux:x86_64 case in fetch-python.sh")
+
+              intel_case = '''Darwin:x86_64)
+          prepare_tree "x86_64-apple-darwin" "freethreaded+debug" "python" "0"
+          prepare_tree "x86_64-apple-darwin" "freethreaded+pgo+lto" "python-release" "1"
+          ;;
+
+          '''
+              s = s.replace(anchor, intel_case + anchor, 1)
+              fetch.write_text(s)
+
+          shim = Path("crates/py/scripts/ld64.lld")
+          s = shim.read_text()
+          old = "LLD=/opt/homebrew/opt/lld/bin/ld64.lld"
+          new = 'LLD="$(brew --prefix lld)/bin/ld64.lld"'
+          if old in s:
+              s = s.replace(old, new, 1)
+              shim.write_text(s)
+          elif new not in s:
+              raise SystemExit("Unexpected ld64.lld layout; refusing an unsafe patch")
+          PY
+
+          chmod +x crates/py/scripts/fetch-python.sh crates/py/scripts/ld64.lld
+          git diff --check
+          git diff -- crates/py/scripts/fetch-python.sh crates/py/scripts/ld64.lld
+
+      - name: Verify Intel Python archives exist
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BASE="https://github.com/astral-sh/python-build-standalone/releases/download/20260807"
+          curl -fsSIL \
+            "$BASE/cpython-3.14.7+20260807-x86_64-apple-darwin-freethreaded+debug-full.tar.zst" \
+            >/dev/null
+          curl -fsSIL \
+            "$BASE/cpython-3.14.7+20260807-x86_64-apple-darwin-freethreaded+pgo+lto-full.tar.zst" \
+            >/dev/null
 
       - name: Cache embedded Python
         id: python-cache
@@ -49,7 +105,7 @@ jobs:
           path: |
             vendor/python
             vendor/python-release
-          key: omp2-python-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/py/scripts/fetch-python.sh', 'crates/py/scripts/pack-pymodules.py', 'crates/py/scripts/gen-py-notices.py', 'crates/py/requirements.txt') }}
+          key: omp2-python-darwin-x64-v2-cpython-3.14.7-pbs-20260807
 
       - name: Prepare embedded Python
         if: steps.python-cache.outputs.cache-hit != 'true'
@@ -58,12 +114,26 @@ jobs:
           set -euxo pipefail
           crates/py/scripts/fetch-python.sh
 
-      - name: Verify embedded Python toolchain
+      - name: Verify embedded Python
         shell: bash
         run: |
           set -euxo pipefail
+
           test -f vendor/python/pyo3-config.txt
+          test -f vendor/python-release/pyo3-config.txt
+          test -f vendor/python-release/needs-lld
+
+          grep -F \
+            "cpython-3.14.7+20260807-x86_64-apple-darwin-freethreaded+debug-full" \
+            vendor/python/.archive.stamp
+          grep -F \
+            "cpython-3.14.7+20260807-x86_64-apple-darwin-freethreaded+pgo+lto-full" \
+            vendor/python-release/.archive.stamp
+
           crates/py/scripts/ld64.lld --version
+
+          file vendor/python/install/bin/python3.14td || true
+          file vendor/python-release/install/bin/python3.14t || true
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -73,45 +143,68 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: omp2-cargo-macos-intel-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'rust-toolchain.toml') }}
+          key: omp2-cargo-darwin-x64-v2-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'rust-toolchain.toml') }}
           restore-keys: |
-            omp2-cargo-macos-intel-
+            omp2-cargo-darwin-x64-v2-
 
-      - name: Build release binary
+      - name: Build production release
         shell: bash
         env:
+          # Upstream .cargo/config.toml defaults to vendor/python (debug CPython).
+          # A production release should use the PGO+LTO tree.
+          PYO3_CONFIG_FILE: ${{ github.workspace }}/vendor/python-release/pyo3-config.txt
           MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: |
           set -euxo pipefail
-          cargo build --release --locked -p omp-app --bin omp
+          cargo build \
+            --release \
+            --locked \
+            -p omp-app \
+            --bin omp
 
-      - name: Verify binary
+      - name: Verify and package binary
         shell: bash
         run: |
           set -euxo pipefail
+
           BIN="target/release/omp"
           test -x "$BIN"
 
-          file "$BIN"
-          file "$BIN" | grep -Eq 'Mach-O 64-bit executable x86_64|Mach-O 64-bit executable x86_64'
+          INFO="$(file "$BIN")"
+          echo "$INFO"
+          echo "$INFO" | grep -q "Mach-O 64-bit executable x86_64"
 
-          # Ad-hoc sign so the downloaded standalone executable has a valid
-          # local code signature. This is not Apple Developer ID notarization.
+          # Ensure it is not accidentally a universal/ARM-only output.
+          lipo -archs "$BIN" | grep -Eq '(^| )x86_64($| )'
+
+          # Ad-hoc signature is sufficient for a locally distributed standalone
+          # binary. It is not Developer ID notarization.
           codesign --force --sign - "$BIN"
           codesign --verify --strict --verbose=2 "$BIN"
 
           "$BIN" --version
 
-          cp "$BIN" omp-darwin-x64
-          chmod +x omp-darwin-x64
-          shasum -a 256 omp-darwin-x64 > omp-darwin-x64.sha256
+          mkdir -p dist/omp2-darwin-x64
+          cp "$BIN" dist/omp2-darwin-x64/omp
+          chmod +x dist/omp2-darwin-x64/omp
 
-      - name: Upload macOS Intel binary
+          (
+            cd dist
+            tar -czf omp2-darwin-x64.tar.gz omp2-darwin-x64
+            shasum -a 256 omp2-darwin-x64.tar.gz > omp2-darwin-x64.tar.gz.sha256
+          )
+
+          echo "=== Output ==="
+          ls -lh dist/omp2-darwin-x64.tar.gz
+          cat dist/omp2-darwin-x64.tar.gz.sha256
+
+      - name: Upload macOS Intel artifact
         uses: actions/upload-artifact@v4
         with:
           name: omp2-darwin-x64
           path: |
-            omp-darwin-x64
-            omp-darwin-x64.sha256
+            dist/omp2-darwin-x64.tar.gz
+            dist/omp2-darwin-x64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0
