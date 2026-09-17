@@ -2,8 +2,7 @@ name: Build OMP x64
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -14,9 +13,23 @@ permissions:
   contents: read
 
 jobs:
-  linux:
-    name: Build linux-x64
-    runs-on: ubuntu-22.04
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux-x64
+            binary: omp-linux-x64
+            native_targets: linux-x64-baseline linux-x64-modern
+
+          - os: macos-15-intel
+            target: darwin-x64
+            binary: omp-darwin-x64
+            native_targets: darwin-x64-baseline
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
@@ -31,79 +44,42 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.bun/install/cache
-          key: bun-linux-${{ hashFiles('**/bun.lock') }}
+          key: bun-${{ runner.os }}-x64-${{ hashFiles('**/bun.lock') }}
           restore-keys: |
-            bun-linux-
+            bun-${{ runner.os }}-x64-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install native addons
-        uses: ./.github/actions/native-artifacts
-        with:
-          targets: linux-x64-baseline linux-x64-modern
-
-      - name: Build linux-x64
-        env:
-          RELEASE_TARGETS: linux-x64
-        run: bun run ci:release:build-binaries
-
-      - name: Test binary
-        run: |
-          chmod +x packages/coding-agent/binaries/omp-linux-x64
-          packages/coding-agent/binaries/omp-linux-x64 --version
-
-      - name: Upload linux-x64
-        uses: actions/upload-artifact@v7
-        with:
-          name: omp-linux-x64
-          path: packages/coding-agent/binaries/omp-linux-x64
-          compression-level: 0
-
-
-  macos:
-    name: Build darwin-x64
-    runs-on: macos-15-intel
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4"
-
-      - name: Cache Bun
-        uses: actions/cache@v5
-        with:
-          path: ~/.bun/install/cache
-          key: bun-macos-x64-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            bun-macos-x64-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build native addon
+      # Build native .node files directly.
+      # Không phụ thuộc artifact từ job khác.
+      - name: Build native addons
         uses: ./.github/actions/bazel-natives
         with:
-          targets: darwin-x64-baseline
-          cache-scope: build-darwin-x64
+          targets: ${{ matrix.native_targets }}
+          cache-scope: build-${{ matrix.target }}
 
-      - name: Build darwin-x64
+      - name: Build ${{ matrix.target }}
         env:
-          RELEASE_TARGETS: darwin-x64
+          RELEASE_TARGETS: ${{ matrix.target }}
         run: bun run ci:release:build-binaries
 
-      - name: Test binary
+      - name: Smoke test
+        shell: bash
         run: |
-          chmod +x packages/coding-agent/binaries/omp-darwin-x64
-          packages/coding-agent/binaries/omp-darwin-x64 --version
+          set -e
+          chmod +x packages/coding-agent/binaries/${{ matrix.binary }}
 
-      - name: Upload darwin-x64
+          runtime_dir="$(mktemp -d)"
+          HOME="$runtime_dir/home" \
+          XDG_DATA_HOME="$runtime_dir/xdg" \
+          packages/coding-agent/binaries/${{ matrix.binary }} --version
+
+      - name: Upload ${{ matrix.target }}
         uses: actions/upload-artifact@v7
         with:
-          name: omp-darwin-x64
-          path: packages/coding-agent/binaries/omp-darwin-x64
+          name: ${{ matrix.binary }}
+          path: packages/coding-agent/binaries/${{ matrix.binary }}
+          if-no-files-found: error
           compression-level: 0
+          retention-days: 7
