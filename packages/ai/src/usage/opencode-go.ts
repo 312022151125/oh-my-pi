@@ -1,4 +1,5 @@
 import { USER_AGENT, getInstallId } from "@oh-my-pi/pi-utils";
+import { createHash } from "node:crypto";
 import { ProviderHttpError } from "../error";
 import type {
 	CredentialRankingStrategy,
@@ -98,21 +99,22 @@ async function readUpstreamErrorMessage(response: Response): Promise<string | un
 }
 
 /**
- * Generate a synthetic OpenCode-style session identifier for local testing.
+ * Generate a deterministic synthetic OpenCode-style session identifier.
  *
- * IMPORTANT:
- * - Synthetic only; not guaranteed to correspond to a real OpenCode session.
- * - Do not use this as an installation identifier.
+ * Same id => same session id.
  */
-export function generateTestSessionId(): string {
-	const hex = crypto.randomBytes(6).toString("hex"); // 12 hex chars
+export function generateSessionId(id: string): string {
+	const hash = createHash("sha256").update(id).digest();
+
+	// First 6 bytes => 12 hex chars
+	const hex = hash.subarray(0, 6).toString("hex");
 
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-	const bytes = crypto.randomBytes(14);
 
+	// Next 14 bytes => 14 deterministic alphanumeric chars
 	let suffix = "";
-	for (const byte of bytes) {
-		suffix += alphabet[byte % alphabet.length];
+	for (let i = 0; i < 14; i++) {
+		suffix += alphabet[hash[6 + i] % alphabet.length];
 	}
 
 	return `ses_${hex}${suffix}`;
@@ -136,7 +138,7 @@ async function fetchOpenCodeGoUsage(params: UsageFetchParams, ctx: UsageFetchCon
 				// (codex/zai) send USER_AGENT here; without it Bun's default
 				// UA is what upstream flags as "Bun fetch".
 				"User-Agent": USER_AGENT,
-				"x-opencode-session": generateTestSessionId(),
+				"x-opencode-session": generateSessionId(getInstallId()),
 			},
 			signal: params.signal,
 		});
