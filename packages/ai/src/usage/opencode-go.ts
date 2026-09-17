@@ -97,6 +97,27 @@ async function readUpstreamErrorMessage(response: Response): Promise<string | un
 	}
 }
 
+/**
+ * Generate a synthetic OpenCode-style session identifier for local testing.
+ *
+ * IMPORTANT:
+ * - Synthetic only; not guaranteed to correspond to a real OpenCode session.
+ * - Do not use this as an installation identifier.
+ */
+export function generateTestSessionId(): string {
+	const hex = crypto.randomBytes(6).toString("hex"); // 12 hex chars
+
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	const bytes = crypto.randomBytes(14);
+
+	let suffix = "";
+	for (const byte of bytes) {
+		suffix += alphabet[byte % alphabet.length];
+	}
+
+	return `ses_${hex}${suffix}`;
+}
+
 async function fetchOpenCodeGoUsage(params: UsageFetchParams, ctx: UsageFetchContext): Promise<UsageReport | null> {
 	if (params.provider !== OPENCODE_GO_PROVIDER) return null;
 	const credential = params.credential;
@@ -115,7 +136,7 @@ async function fetchOpenCodeGoUsage(params: UsageFetchParams, ctx: UsageFetchCon
 				// (codex/zai) send USER_AGENT here; without it Bun's default
 				// UA is what upstream flags as "Bun fetch".
 				"User-Agent": USER_AGENT,
-				"x-opencode-session": getInstallId(),
+				"x-opencode-session": generateTestSessionId(),
 			},
 			signal: params.signal,
 		});

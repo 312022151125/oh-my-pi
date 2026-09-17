@@ -29,6 +29,27 @@ function setHeader(headers: Record<string, string>, name: string, value: string)
 }
 
 /**
+ * Generate a synthetic OpenCode-style session identifier for local testing.
+ *
+ * IMPORTANT:
+ * - Synthetic only; not guaranteed to correspond to a real OpenCode session.
+ * - Do not use this as an installation identifier.
+ */
+export function generateTestSessionId(): string {
+	const hex = crypto.randomBytes(6).toString("hex"); // 12 hex chars
+
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	const bytes = crypto.randomBytes(14);
+
+	let suffix = "";
+	for (const byte of bytes) {
+		suffix += alphabet[byte % alphabet.length];
+	}
+
+	return `ses_${hex}${suffix}`;
+}
+
+/**
  * Project omp's identity and authoritative conversation id onto the headers
  * understood by the active inference protocol and host.
  */
@@ -46,7 +67,7 @@ export function applyInferenceHeaders(headers: Record<string, string>, options: 
 
 	if (isOpenCode) {
 		setHeaderIfAbsent(headers, "User-Agent", USER_AGENT);
-		setHeader(headers, "x-opencode-session", sessionId);
+		setHeader(headers, "x-opencode-session", generateTestSessionId());
 	}
 }
 
