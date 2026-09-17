@@ -1,4 +1,4 @@
-import { USER_AGENT, getInstallId } from "@oh-my-pi/pi-utils";
+import { USER_AGENT, getInstallId, generateSessionId, OPENCODE_CLIENT, OPENCODE_USER_AGENT } from "@oh-my-pi/pi-utils";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import { toClinePassPublicModelId } from "../cline-pass-model-id";
 import {
@@ -3023,7 +3023,11 @@ function openCodeModelManagerOptions(
 					// conversation: attribute with the stable install id
 					// (x-opencode-session required from 09/06) and omp's UA
 					// instead of Bun's default.
-					headers: { "User-Agent": USER_AGENT, "x-opencode-session": getInstallId() },
+					headers: {
+					"User-Agent": OPENCODE_USER_AGENT,
+					"x-opencode-client": OPENCODE_CLIENT,
+					"x-opencode-session": generateSessionId(getInstallId()),
+				},
 					mapModel: (entry, defaults) => {
 						const reference = references.get(defaults.id);
 						const name = toModelName(entry.name, reference?.name ?? defaults.name);

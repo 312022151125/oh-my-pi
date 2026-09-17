@@ -1,7 +1,7 @@
 /** Shared inference request identity headers. */
 
 import { USER_AGENT } from "@oh-my-pi/pi-utils";
-import { createHash } from "node:crypto";
+import { generateSessionId, OPENCODE_CLIENT, OPENCODE_USER_AGENT } from "@oh-my-pi/pi-utils";
 
 /** Options controlling provider and protocol inference headers. */
 export interface InferenceHeaderOptions {
@@ -30,28 +30,6 @@ function setHeader(headers: Record<string, string>, name: string, value: string)
 }
 
 /**
- * Generate a deterministic synthetic OpenCode-style session identifier.
- *
- * Same id => same session id.
- */
-export function generateSessionId(id: string): string {
-	const hash = createHash("sha256").update(id).digest();
-
-	// First 6 bytes => 12 hex chars
-	const hex = hash.subarray(0, 6).toString("hex");
-
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-	// Next 14 bytes => 14 deterministic alphanumeric chars
-	let suffix = "";
-	for (let i = 0; i < 14; i++) {
-		suffix += alphabet[hash[6 + i] % alphabet.length];
-	}
-
-	return `ses_${hex}${suffix}`;
-}
-
-/**
  * Project omp's identity and authoritative conversation id onto the headers
  * understood by the active inference protocol and host.
  */
@@ -68,7 +46,15 @@ export function applyInferenceHeaders(headers: Record<string, string>, options: 
 	}
 
 	if (isOpenCode) {
-		setHeaderIfAbsent(headers, "User-Agent", USER_AGENT);
+		// OpenCode gateways require the full CLI wire format:
+		// - User-Agent must be the opencode CLI string (overwrites any existing UA)
+		// - x-opencode-client identifies as the CLI
+		// - x-opencode-session uses the deterministic ses_ format
+		// Use setHeader (not setHeaderIfAbsent) for User-Agent because this is a
+		// deliberate masquerade requirement; if a caller explicitly set an
+		// opencode UA we keep it (setHeader is idempotent for same value).
+		setHeader(headers, "User-Agent", OPENCODE_USER_AGENT);
+		setHeader(headers, "x-opencode-client", OPENCODE_CLIENT);
 		setHeader(headers, "x-opencode-session", generateSessionId(sessionId));
 	}
 }

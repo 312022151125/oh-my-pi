@@ -1,5 +1,4 @@
-import { USER_AGENT, getInstallId } from "@oh-my-pi/pi-utils";
-import { createHash } from "node:crypto";
+import { USER_AGENT, getInstallId, generateSessionId, OPENCODE_CLIENT, OPENCODE_USER_AGENT } from "@oh-my-pi/pi-utils";
 import { ProviderHttpError } from "../error";
 import type {
 	CredentialRankingStrategy,
@@ -98,28 +97,6 @@ async function readUpstreamErrorMessage(response: Response): Promise<string | un
 	}
 }
 
-/**
- * Generate a deterministic synthetic OpenCode-style session identifier.
- *
- * Same id => same session id.
- */
-export function generateSessionId(id: string): string {
-	const hash = createHash("sha256").update(id).digest();
-
-	// First 6 bytes => 12 hex chars
-	const hex = hash.subarray(0, 6).toString("hex");
-
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-	// Next 14 bytes => 14 deterministic alphanumeric chars
-	let suffix = "";
-	for (let i = 0; i < 14; i++) {
-		suffix += alphabet[hash[6 + i] % alphabet.length];
-	}
-
-	return `ses_${hex}${suffix}`;
-}
-
 async function fetchOpenCodeGoUsage(params: UsageFetchParams, ctx: UsageFetchContext): Promise<UsageReport | null> {
 	if (params.provider !== OPENCODE_GO_PROVIDER) return null;
 	const credential = params.credential;
@@ -134,10 +111,10 @@ async function fetchOpenCodeGoUsage(params: UsageFetchParams, ctx: UsageFetchCon
 				authorization: `Bearer ${credential.apiKey}`,
 				// Background poll outside any conversation: attribute with the
 				// stable install id so OpenCode can optimize/service the
-				// request (x-opencode-session required from 09/06). Peers
-				// (codex/zai) send USER_AGENT here; without it Bun's default
-				// UA is what upstream flags as "Bun fetch".
-				"User-Agent": USER_AGENT,
+				// request (x-opencode-session required from 09/06).
+				// Send full opencode CLI wire format for proper attribution.
+				"User-Agent": OPENCODE_USER_AGENT,
+				"x-opencode-client": OPENCODE_CLIENT,
 				"x-opencode-session": generateSessionId(getInstallId()),
 			},
 			signal: params.signal,
