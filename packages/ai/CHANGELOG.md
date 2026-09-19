@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenCode Zen/Go free-tier 403 `FreeTierError` on model requests: OpenCode's gate rejects clients whose `User-Agent` is not `opencode/<version>` and whose `x-opencode-session` is not the canonical `ses_<12 hex><14 alnum>` shape, which omp's identity failed on both counts. All OpenCode inference now sends the canonical client UA and a stable session token derived from the conversation id so routing and prompt caching stay pinned across turns ([#12306](https://github.com/can1357/oh-my-pi/issues/12306)).
+
 ## [18.2.6] - 2026-09-18
 
 ### Fixed

@@ -6,10 +6,16 @@
 
 - Added `buildDiscoveredModel` helper for custom providers
 - Added support for glob-based patterns in identity overrides
+- Added `wire/opencode` helpers (`OPENCODE_USER_AGENT`, `toOpenCodeSessionToken`, `OPENCODE_SESSION_TOKEN_PATTERN`) for the OpenCode gateway client-identity contract
 
 ### Changed
 
 - Centralized llama.cpp Qwen routing and thinking policy in KDL, with reviewed Bonsai lineage aliases and shared backend policy for custom provider names.
+- OpenCode Go/Zen live model discovery and usage polls now attribute with the canonical OpenCode client identity (`opencode/*` User-Agent + canonical `ses_` session token) instead of omp's UA and raw install id.
+
+### Fixed
+
+- Fixed OpenCode free-tier 403 (`FreeTierError`) on tool-less auxiliary calls: all OpenCode traffic now carries the client identity the gateway's gate requires.
 
 ## [18.2.5] - 2026-09-17
 
