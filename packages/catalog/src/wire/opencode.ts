@@ -11,6 +11,53 @@
 /** Canonical OpenCode client User-Agent; the gate reads only the leading token. */
 export const OPENCODE_USER_AGENT = "opencode/1.18.31";
 
+/** Provider ids whose hosts sit behind the OpenCode gateways (Zen, Go). */
+export const OPENCODE_PROVIDER_IDS: ReadonlySet<string> = new Set(["opencode-zen", "opencode-go"]);
+
+/** Whether `provider` is served by an OpenCode gateway. */
+export function isOpenCodeProvider(provider: string): boolean {
+	return OPENCODE_PROVIDER_IDS.has(provider);
+}
+
+/**
+ * The gate additionally requires at least these OpenCode core tool NAMES in
+ * `tools[]` (schemas are ignored, extra non-OpenCode tools are fine, and the
+ * count is over distinct names). Agent harnesses carrying a normal tool roster
+ * satisfy this natively; tool-less auxiliary calls must pad.
+ */
+export const OPENCODE_GATE_TOOL_NAMES = ["bash", "edit", "glob", "grep", "read"] as const;
+
+/** Gate tool names missing from `names` (exact-match — the gate compares names only). */
+export function missingOpenCodeGateToolNames(names: Iterable<string>): string[] {
+	const present = new Set(names);
+	return OPENCODE_GATE_TOOL_NAMES.filter(name => !present.has(name));
+}
+
+/**
+ * Pad `tools` with the gate-required OpenCode tool names so tool-less auxiliary
+ * calls (advisors, one-shot helpers) pass the body check. Pads carry no
+ * parameters and an empty description — the gate ignores schemas — but callers
+ * MUST keep them out of the agent loop's tool registry: they are wire-shape
+ * filler, not executable work (the roster should never offer "bash" to a call
+ * that was built without tools).
+ *
+ * Returns the input array unchanged (same identity) when nothing is missing.
+ */
+export function withOpenCodeGateTools<T extends { name: string }>(tools: readonly T[] | undefined): T[] {
+	const existing = tools ?? [];
+	const missing = missingOpenCodeGateToolNames(existing.map(tool => tool.name));
+	if (missing.length === 0) return existing as T[];
+	// The stubs structurally differ from T only in fields the wire never reads.
+	// `strict: false` keeps every transport's strict-mode normalization inert.
+	const pads = missing.map(name => ({
+		name,
+		description: "",
+		parameters: { type: "object" },
+		strict: false,
+	})) as unknown as T[];
+	return [...existing, ...pads];
+}
+
 /** Shape the OpenCode gate requires for `x-opencode-session`. */
 export const OPENCODE_SESSION_TOKEN_PATTERN = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 

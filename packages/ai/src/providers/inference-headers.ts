@@ -1,6 +1,6 @@
 /** Shared inference request identity headers. */
 
-import { OPENCODE_USER_AGENT, toOpenCodeSessionToken } from "@oh-my-pi/pi-catalog/wire/opencode";
+import { isOpenCodeProvider, OPENCODE_USER_AGENT, toOpenCodeSessionToken } from "@oh-my-pi/pi-catalog/wire/opencode";
 import { getInstallId, USER_AGENT } from "@oh-my-pi/pi-utils";
 
 /** Options controlling provider and protocol inference headers. */
@@ -9,13 +9,6 @@ export interface InferenceHeaderOptions {
 	protocol: "anthropic" | "google" | "openai";
 	sessionId?: string;
 }
-
-/**
- * OpenCode gateways (Zen, Go) gate their contributor free tier on client
- * identity; `@oh-my-pi/pi-catalog/wire/opencode` documents the wire contract
- * ([#12306](https://github.com/can1357/oh-my-pi/issues/12306)).
- */
-const OPENCODE_PROVIDER_IDS = new Set(["opencode-zen", "opencode-go"]);
 
 /** Set a header unless the map already contains that field under any casing. */
 export function setHeaderIfAbsent(headers: Record<string, string>, name: string, value: string): void {
@@ -41,7 +34,7 @@ function setHeader(headers: Record<string, string>, name: string, value: string)
  * understood by the active inference protocol and host.
  */
 export function applyInferenceHeaders(headers: Record<string, string>, options: InferenceHeaderOptions): void {
-	const isOpenCode = OPENCODE_PROVIDER_IDS.has(options.provider);
+	const isOpenCode = isOpenCodeProvider(options.provider);
 
 	if (options.protocol === "anthropic") {
 		if (options.sessionId) setHeader(headers, "X-Claude-Code-Session-Id", options.sessionId);

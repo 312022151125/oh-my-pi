@@ -15,6 +15,7 @@ import {
 } from "@oh-my-pi/pi-catalog/model-thinking";
 import { providerEntries } from "@oh-my-pi/pi-catalog/compat/providers";
 import { CODEX_BASE_URL } from "@oh-my-pi/pi-catalog/wire/codex";
+import { isOpenCodeProvider, withOpenCodeGateTools } from "@oh-my-pi/pi-catalog/wire/opencode";
 import { $env, $pickenv, getProviderInFlightRoot, isEnoent, logger, untilAborted } from "@oh-my-pi/pi-utils";
 import { getCustomApi } from "./api-registry";
 import { createAuthRetryKeyState, isApiKeyResolver, resolveNextAuthRetryKey } from "./auth-retry";
@@ -946,6 +947,16 @@ function streamDispatch<TApi extends Api>(
 ): AssistantMessageEventStream {
 	const requestOptions = withTransportFetch(model, (options || {}) as StreamOptions) as OptionsForApi<TApi>;
 	assertExplicitOpenAIResponsesPromptCacheSupport(model, requestOptions);
+	// OpenCode's gate requires at least five OpenCode core tool names in
+	// tools[] (schemas ignored) on every request, so tool-less auxiliary calls
+	// (advisors, one-shot helpers) are refused with 403 FreeTierError even when
+	// the client-identity headers are correct (#12306). Pad with stub entries
+	// here — the single dispatch funnel for stream/complete/streamSimple — and
+	// never expose them to the caller's tool registry: they are wire-shape
+	// filler, not executable work.
+	if (isOpenCodeProvider(model.provider)) {
+		context = { ...context, tools: withOpenCodeGateTools(context.tools) };
+	}
 
 	// Check custom API registry first (extension-provided APIs like "vertex-claude-api")
 	const customApiProvider = getCustomApi(model.api);
@@ -1174,7 +1185,15 @@ function isRetryableUpstreamError(
 	// classify as RATE_LIMIT_EXCEEDED in `parseRateLimitReason` and stay in the
 	// provider's own backoff layer instead of burning siblings.
 	if (AIError.isCodexChatGPTAccountPolicyError(error, model.provider, model.id)) return true;
-	if (status === 401 || (status === 403 && !isConcurrencyCapExclusion(status, message))) return true;
+	if (
+		status === 401 ||
+		(status === 403 &&
+			!isConcurrencyCapExclusion(status, message) &&
+			// OpenCode's free-tier gate denial is model-scoped client policy —
+			// the same key keeps serving paid SKUs, so rotation cannot fix it.
+			!AIError.isOpencodeFreeTierGateMessage(message))
+	)
+		return true;
 	return isUsageLimitOutcome(status, message);
 }
 
