@@ -6,7 +6,7 @@
 
 - Added `buildDiscoveredModel` helper for custom providers
 - Added support for glob-based patterns in identity overrides
-- Added `wire/opencode` helpers (`OPENCODE_USER_AGENT`, `toOpenCodeSessionToken`, `OPENCODE_SESSION_TOKEN_PATTERN`, `OPENCODE_GATE_TOOL_NAMES`, `withOpenCodeGateTools`) for the OpenCode gateway client-identity and free-tier body-gate contracts
+- Added `wire/opencode` helpers (`OPENCODE_USER_AGENT`, `toOpenCodeSessionToken`, `OPENCODE_SESSION_TOKEN_PATTERN`, `OPENCODE_GATE_TOOL_NAMES`, `withOpenCodeGateTools`) for the OpenCode gateway client-identity and free-tier body-gate contracts ([#12556](https://github.com/can1357/oh-my-pi/pull/12556) by [@palprateek](https://github.com/palprateek))
 
 ### Changed
 
