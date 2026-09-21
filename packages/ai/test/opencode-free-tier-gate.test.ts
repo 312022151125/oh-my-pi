@@ -72,27 +72,38 @@ async function captureRequestTools(model: Model<"openai-completions">): Promise<
 }
 
 describe("withOpenCodeGateTools", () => {
-	it("pads exactly the gate names missing from the roster", () => {
+	it("pads a single gate name up to the two-name threshold", () => {
 		const padded = withOpenCodeGateTools([{ name: "read", description: "r", parameters: {} }]);
-		expect(padded.map(tool => tool.name).sort()).toEqual([...OPENCODE_GATE_TOOL_NAMES].sort());
+		expect(padded.map(tool => tool.name).sort()).toEqual(["bash", "read"]);
 	});
 
-	it("returns the same array identity when the roster already satisfies the gate", () => {
-		const roster = OPENCODE_GATE_TOOL_NAMES.map(name => ({ name, description: "", parameters: {} }));
-		expect(withOpenCodeGateTools(roster)).toBe(roster);
-	});
-
-	it("pads a tool-less call to the full required roster", () => {
+	it("pads a tool-less call with exactly bash and read", () => {
 		expect(
 			withOpenCodeGateTools<{ name: string }>(undefined)
 				.map(tool => tool.name)
 				.sort(),
-		).toEqual([...OPENCODE_GATE_TOOL_NAMES].sort());
+		).toEqual(["bash", "read"]);
 		expect(
 			withOpenCodeGateTools<{ name: string }>([])
 				.map(tool => tool.name)
 				.sort(),
-		).toEqual([...OPENCODE_GATE_TOOL_NAMES].sort());
+		).toEqual(["bash", "read"]);
+	});
+
+	it("pads a non-gate roster with bash and read", () => {
+		const padded = withOpenCodeGateTools([{ name: "custom", description: "c", parameters: {} }]);
+		expect(padded.map(tool => tool.name).sort()).toEqual(["bash", "custom", "read"]);
+	});
+
+	it("returns the same array identity when the roster already satisfies the gate", () => {
+		const full = OPENCODE_GATE_TOOL_NAMES.map(name => ({ name, description: "", parameters: {} }));
+		expect(withOpenCodeGateTools(full)).toBe(full);
+		// Any two of the five satisfy the gate — no padding needed.
+		const pair = [
+			{ name: "edit", description: "", parameters: {} },
+			{ name: "glob", description: "", parameters: {} },
+		];
+		expect(withOpenCodeGateTools(pair)).toBe(pair);
 	});
 
 	it("does not mutate the caller's array", () => {
@@ -104,19 +115,16 @@ describe("withOpenCodeGateTools", () => {
 });
 
 describe("OpenCode free-tier body gate", () => {
-	it("tool-less auxiliary calls reach the wire with the full gate roster", async () => {
+	it("tool-less auxiliary calls reach the wire with the two-name gate roster", async () => {
 		const tools = await captureRequestTools(makeOpenCodeGoCompletionsModel());
-		const names = new Set(tools.map(tool => tool.name));
-		for (const required of OPENCODE_GATE_TOOL_NAMES) {
-			expect(names.has(required)).toBe(true);
-		}
+		expect(tools.map(tool => tool.name).sort()).toEqual(["bash", "read"]);
 	});
 
 	it("pads do not disturb a roster that already satisfies the gate", async () => {
-		// A single-tool call gets exactly the missing four, nothing else:
-		// five total entries on the wire.
+		// A single-tool call gets exactly one stub, nothing else:
+		// two total entries on the wire.
 		const padded = withOpenCodeGateTools([{ name: "bash", description: "run", parameters: { type: "object" } }]);
-		expect(padded).toHaveLength(5);
+		expect(padded).toHaveLength(2);
 	});
 
 	it("leaves non-OpenCode providers untouched", async () => {

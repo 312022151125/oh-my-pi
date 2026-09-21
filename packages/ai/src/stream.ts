@@ -947,7 +947,7 @@ function streamDispatch<TApi extends Api>(
 ): AssistantMessageEventStream {
 	const requestOptions = withTransportFetch(model, (options || {}) as StreamOptions) as OptionsForApi<TApi>;
 	assertExplicitOpenAIResponsesPromptCacheSupport(model, requestOptions);
-	// OpenCode's gate requires at least five OpenCode core tool names in
+	// OpenCode's gate requires at least two OpenCode core tool names in
 	// tools[] (schemas ignored) on every request, so tool-less auxiliary calls
 	// (advisors, one-shot helpers) are refused with 403 FreeTierError even when
 	// the client-identity headers are correct (#12306). Pad with stub entries
