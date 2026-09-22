@@ -937,7 +937,7 @@ function streamDispatch<TApi extends Api>(
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): AssistantMessageEventStream {
-	const requestOptions = withTransportFetch(model, (options || {}) as StreamOptions) as OptionsForApi<TApi>;
+	let requestOptions = withTransportFetch(model, (options || {}) as StreamOptions) as OptionsForApi<TApi>;
 	assertExplicitOpenAIResponsesPromptCacheSupport(model, requestOptions);
 	// OpenCode's gate requires at least two OpenCode core tool names in
 	// tools[] (schemas ignored) on every request, so tool-less auxiliary calls
@@ -945,9 +945,21 @@ function streamDispatch<TApi extends Api>(
 	// the client-identity headers are correct (#12306). Pad with stub entries
 	// here — the single dispatch funnel for stream/complete/streamSimple — and
 	// never expose them to the caller's tool registry: they are wire-shape
-	// filler, not executable work.
+	// filler, not executable work. A padded tool-less call additionally pins
+	// toolChoice to "none" (unless the caller set one): the caller expects text
+	// and has no exec handler, so a phantom call to a stub would surface as
+	// empty text. The gate reads tools[], not tool_choice, so the pin is
+	// gate-neutral.
 	if (isOpenCodeProvider(model.provider)) {
-		context = { ...context, tools: withOpenCodeGateTools(context.tools) };
+		const originalTools = context.tools;
+		const paddedTools = withOpenCodeGateTools(originalTools);
+		if (paddedTools !== originalTools) {
+			context = { ...context, tools: paddedTools };
+			const existingChoice = (requestOptions as { toolChoice?: ToolChoice }).toolChoice;
+			if ((originalTools ?? []).length === 0 && existingChoice === undefined) {
+				requestOptions = { ...requestOptions, toolChoice: "none" } as OptionsForApi<TApi>;
+			}
+		}
 	}
 
 	// Check custom API registry first (extension-provided APIs like "vertex-claude-api")

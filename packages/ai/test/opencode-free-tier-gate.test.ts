@@ -57,18 +57,40 @@ function chatSse(): Response {
 	});
 }
 
-async function captureRequestTools(model: Model<"openai-completions">): Promise<Array<{ name: string }>> {
+async function captureRequestBody(
+	model: Model<"openai-completions">,
+	contextTools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
+	options?: { toolChoice?: "auto" | "none" },
+): Promise<{ body: { tools?: Array<{ function: { name: string } }>; tool_choice?: unknown }; text: string }> {
 	let body: unknown;
 	const fetchMock = async (_input: string | URL | Request, init?: RequestInit) => {
 		body = JSON.parse(String(init?.body));
 		return chatSse();
 	};
-	await completeSimple(
+	const response = await completeSimple(
 		model,
-		{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
-		{ apiKey: "key", fetch: fetchMock as typeof fetch },
+		{
+			messages: [{ role: "user", content: "hi", timestamp: 0 }],
+			...(contextTools !== undefined ? { tools: contextTools } : {}),
+		},
+		{
+			apiKey: "key",
+			fetch: fetchMock as typeof fetch,
+			...(options?.toolChoice ? { toolChoice: options.toolChoice } : {}),
+		},
 	);
-	return (body as { tools?: Array<{ function: { name: string } }> }).tools?.map(tool => tool.function) ?? [];
+	return {
+		body: body as { tools?: Array<{ function: { name: string } }>; tool_choice?: unknown },
+		text: response.content
+			.filter(part => part.type === "text")
+			.map(part => part.text)
+			.join(""),
+	};
+}
+
+async function captureRequestTools(model: Model<"openai-completions">): Promise<Array<{ name: string }>> {
+	const { body } = await captureRequestBody(model);
+	return body.tools?.map(tool => tool.function) ?? [];
 }
 
 describe("withOpenCodeGateTools", () => {
@@ -130,6 +152,31 @@ describe("OpenCode free-tier body gate", () => {
 	it("leaves non-OpenCode providers untouched", async () => {
 		const tools = await captureRequestTools(makeOpenAICompletionsModel());
 		expect(tools).toEqual([]);
+	});
+
+	it("pins tool_choice to none on padded tool-less calls so stubs stay uncalled", async () => {
+		const { body, text } = await captureRequestBody(makeOpenCodeGoCompletionsModel());
+		expect(body.tools?.map(tool => tool.function.name).sort()).toEqual(["bash", "read"]);
+		expect(body.tool_choice).toBe("none");
+		// The auxiliary turn still completes as text: no phantom stub call
+		// swallows the model's answer.
+		expect(text).toBe("ok");
+	});
+
+	it("leaves an explicit caller toolChoice alone on padded tool-less calls", async () => {
+		const { body } = await captureRequestBody(makeOpenCodeGoCompletionsModel(), undefined, { toolChoice: "auto" });
+		expect(body.tools?.map(tool => tool.function.name).sort()).toEqual(["bash", "read"]);
+		expect(body.tool_choice).toBe("auto");
+	});
+
+	it("does not pin tool_choice when the caller offered real tools", async () => {
+		// A single-gate-name roster gets one stub, but the turn owns a real
+		// tool the model must remain free to call.
+		const { body } = await captureRequestBody(makeOpenCodeGoCompletionsModel(), [
+			{ name: "read", description: "r", parameters: { type: "object" } },
+		]);
+		expect(body.tools?.map(tool => tool.function.name).sort()).toEqual(["bash", "read"]);
+		expect(body.tool_choice).toBeUndefined();
 	});
 });
 
