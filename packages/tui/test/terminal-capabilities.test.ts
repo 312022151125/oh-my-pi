@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	detectStyledUnderlineSupport,
 	detectTerminalId,
@@ -72,14 +75,18 @@ describe("detectTerminalId", () => {
 		expect(detectTerminalId({ TERM_PROGRAM: "rio", COLORTERM: "truecolor" })).toBe("rio");
 	});
 
-	it("maps rio to kitty graphics with conservative unverified capabilities", () => {
-		// Reporter-verified (#12205): kitty graphics + true color. Everything
-		// else stays on the base defaults until proven inside rio itself.
+	it("maps rio to kitty graphics with verified hyperlink capability", () => {
+		// Reporter-verified (#12205): kitty graphics + true color. Hyperlinks
+		// verified against rio 0.5.28's published escape sequence support plus a
+		// live OSC 8 Alt+click and OSC 52 round-trip. Notifications stay on BEL:
+		// rio's Windows toast needs an AUMID registration it does not create
+		// (observed silent drop), so Osc9 would only remove the D-Bus fallback
+		// for Linux rio users.
 		const info = getTerminalInfo("rio");
 		expect(info.id).toBe("rio");
 		expect(info.imageProtocol).toBe(ImageProtocol.Kitty);
 		expect(info.trueColor).toBe(true);
-		expect(info.hyperlinks).toBe(false);
+		expect(info.hyperlinks).toBe(true);
 		expect(info.notifyProtocol).toBe(NotifyProtocol.Bell);
 	});
 
@@ -91,6 +98,57 @@ describe("detectTerminalId", () => {
 		const env = { TERM: "xterm-256color", TERM_PROGRAM: "", COLORTERM: "truecolor", VTE_VERSION: "8400" };
 
 		expect(detectTerminalId(env)).toBe("trueColor");
+	});
+});
+
+describe("tmux client terminal resolution", () => {
+	it.skipIf(process.platform === "win32")("uses the attached client's terminal profile", async () => {
+		const binDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-tmux-client-"));
+		try {
+			const tmux = path.join(binDir, "tmux");
+			await Bun.write(
+				tmux,
+				`#!/bin/sh
+[ "$1" = "display-message" ] && [ "$2" = "-p" ] && [ "$3" = '#{client_termtype}' ] || exit 64
+printf "%s\\n" "WezTerm 20260905-175422-0f4b5596"
+`,
+			);
+			await fs.chmod(tmux, 0o755);
+			const env = subprocessEnv({
+				PI_TEST_RUNTIME: undefined,
+				BUN_ENV: undefined,
+				NODE_ENV: undefined,
+				TERM: "tmux-256color",
+				TERM_PROGRAM: "tmux",
+				TERM_PROGRAM_VERSION: "3.6b",
+				COLORTERM: "truecolor",
+				TMUX: "/tmp/tmux-1000/default,4242,0",
+				SSH_CONNECTION: "client 1 server 22",
+				PATH: `${binDir}${path.delimiter}${Bun.env.PATH ?? ""}`,
+			});
+			const proc = Bun.spawn({
+				cmd: [
+					process.execPath,
+					"--eval",
+					`import { TERMINAL, TERMINAL_ID } from "@oh-my-pi/pi-tui/terminal-capabilities";
+console.log(JSON.stringify({ id: TERMINAL_ID, notifyProtocol: TERMINAL.notifyProtocol }));`,
+				],
+				env,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+				proc.exited,
+			]);
+
+			expect(stderr).toBe("");
+			expect(exitCode).toBe(0);
+			expect(stdout).toBe('{"id":"wezterm","notifyProtocol":"\\u001b]9;"}\n');
+		} finally {
+			await fs.rm(binDir, { force: true, recursive: true });
+		}
 	});
 });
 
