@@ -429,8 +429,11 @@ describe("update-cli install target detection", () => {
 		"refuses a foreign native target that does not report an OMP version",
 		async () => {
 			const dir = await makeTempDir();
+			const foreignPath = path.join(dir, "foreign");
 			const aliasPath = path.join(dir, "omp");
-			await fs.symlink(process.execPath, aliasPath);
+			await fs.copyFile(process.execPath, foreignPath);
+			await fs.chmod(foreignPath, 0o755);
+			await fs.symlink(foreignPath, aliasPath);
 			const fetchImpl = vi.fn(async () => new Response());
 			const target = resolveUpdateTargetFromPath(aliasPath, undefined, {
 				allowPackageManagers: true,
@@ -696,6 +699,7 @@ describe("migrateRenamedInstall transaction", () => {
 		tag: "v999.1.0",
 		version: "999.1.0",
 		packages: { pkg: "@new/omp", natives: "@new/natives" },
+		registry: "https://registry.npmjs.org/",
 	};
 
 	function scriptedSteps(script: { install: number[]; removeOld?: number; verify: boolean[] }): {
@@ -1789,6 +1793,7 @@ describe("update-cli manager update recovery", () => {
 		tag: "v18.0.1",
 		version: "18.0.1",
 		packages: { pkg: "@oh-my-pi/pi-coding-agent", natives: "@oh-my-pi/pi-natives" },
+		registry: "https://registry.npmjs.org/",
 	};
 	const launcherPath = "C:/Users/test/AppData/Roaming/npm/omp.cmd";
 
