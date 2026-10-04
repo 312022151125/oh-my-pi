@@ -523,6 +523,11 @@ exit 64
 			return;
 		}
 
+		// fish reads `$XDG_CONFIG_HOME/fish/config.fish` when that variable is set
+		// and only falls back to `$HOME/.config/fish` otherwise. The Rust shell
+		// copies the host env verbatim (`std::env::vars_os`), so a machine-wide
+		// XDG_CONFIG_HOME would redirect the config.fish fixture below. Pin the
+		// variable to the same directory HOME already points at.
 		const shellDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-fish-shellpath-"));
 		const configDir = path.join(shellDir, ".config", "fish");
 		fs.mkdirSync(path.join(configDir, "conf.d"), { recursive: true });
@@ -540,6 +545,7 @@ exit 64
 			env: {
 				PATH: Bun.env.PATH ?? "",
 				HOME: shellDir,
+				XDG_CONFIG_HOME: path.join(shellDir, ".config"),
 			},
 			prefix: undefined,
 		});

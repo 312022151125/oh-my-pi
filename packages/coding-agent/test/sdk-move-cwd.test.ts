@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -14,6 +14,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
 import { getProjectAgentDir, getProjectDir, setProjectDir, removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { scrubEnv } from "./helpers/env-scrub";
 
 function textContent(result: { content?: Array<{ type: string; text?: string }> }): string {
 	return (
@@ -28,6 +29,18 @@ function textContent(result: { content?: Array<{ type: string; text?: string }> 
 
 describe("createAgentSession cwd after /move", () => {
 	const tempDirs: string[] = [];
+	// `HINDSIGHT_BANK_ID` outranks every settings layer, so a machine-wide export
+	// would decide which bank the rebind assertions see.
+	const restoreScrubbedEnv = scrubEnv([
+		"HINDSIGHT_API_URL",
+		"HINDSIGHT_API_TOKEN",
+		"HINDSIGHT_BANK_ID",
+		"HINDSIGHT_SCOPING",
+	]);
+
+	afterAll(() => {
+		restoreScrubbedEnv();
+	});
 
 	afterEach(() => {
 		// `Settings.loadIsolated` opened `<agentDir>/agent.db`; Windows cannot delete it while open.

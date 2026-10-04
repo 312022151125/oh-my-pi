@@ -15,6 +15,8 @@ import * as snapcompactModule from "@oh-my-pi/snapcompact";
 
 import { cfgCompactionMethodOrder } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 
+import { scrubEnv } from "./helpers/env-scrub";
+
 const CONTEXT_WINDOW = 100_000;
 const THRESHOLD = 50_000;
 const SPECULATION_BAND_START = THRESHOLD - 8_192;
@@ -52,6 +54,7 @@ describe("async speculative compaction", () => {
 	let maintenance: SessionMaintenance;
 	let agent: Agent;
 	let events: string[];
+	let restoreEnv: () => void;
 
 	function appendSummarizableConversation(): void {
 		const text = "conversation ".repeat(8_000);
@@ -167,6 +170,7 @@ describe("async speculative compaction", () => {
 	}
 
 	beforeAll(async () => {
+		restoreEnv = scrubEnv(["ANTHROPIC_BASE_URL"]);
 		authStorage = await AuthStorage.create(":memory:");
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
@@ -190,6 +194,7 @@ describe("async speculative compaction", () => {
 
 	afterAll(() => {
 		authStorage.close();
+		restoreEnv();
 	});
 
 	it("reminds only near threshold once per experimental window, including the first and reset windows", async () => {

@@ -242,6 +242,13 @@ describe("browser executable selection", () => {
 					OMP_BROWSER_PROBE_PLATFORM: "darwin",
 					PUPPETEER_EXECUTABLE_PATH: "",
 				};
+				// The XDG roots only pin the child's puppeteer cache while PI_CODING_AGENT_DIR
+				// is unset: `refreshDirsFromEnv` prefers the explicit agent dir over every
+				// XDG root, so a machine-wide export would resolve the cache under
+				// `<agentDir>/puppeteer` and miss the stub seeded below. Drop the explicit
+				// overrides from the child env for the same reason.
+				delete env.PI_CODING_AGENT_DIR;
+				delete env.PI_CONFIG_DIR;
 
 				// System Google Chrome bundle (com.google.Chrome) — the LaunchServices
 				// hijacker the fix must avoid selecting.
@@ -271,5 +278,10 @@ describe("browser executable selection", () => {
 				await tempDir.remove();
 			}
 		},
+		// The probe is a separate `bun` process, so this test's cost includes a full
+		// runtime startup plus the stub-binary writes. That exceeded bun's 5000ms
+		// default when the whole suite ran with the CPU saturated, even though the
+		// resolution logic itself is synchronous.
+		60_000,
 	);
 });

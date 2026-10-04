@@ -17,6 +17,7 @@ import * as path from "node:path";
 import { removeWithRetries, VERSION } from "@oh-my-pi/pi-utils";
 import { lookup } from "../../src/config/registry";
 import { Settings } from "../../src/config/settings";
+import { CURRENT_SETUP_VERSION } from "../../src/modes/setup";
 import {
 	CHANGELOG_COMMAND_USAGE,
 	type ChangelogEntry,
@@ -362,7 +363,10 @@ describe.skipIf(!hasPtyHarness)("interactive startup changelog PTY smoke", () =>
 				await fs.mkdir(path.join(root, "xdg-config"), { recursive: true });
 				await fs.mkdir(path.join(root, "xdg-state"), { recursive: true });
 				await fs.mkdir(path.join(root, "xdg-data"), { recursive: true });
-				await Bun.write(path.join(agentDir, "config.yml"), "setupVersion: 1\ncollapseChangelog: false\n");
+				await Bun.write(
+					path.join(agentDir, "config.yml"),
+					`setupVersion: ${CURRENT_SETUP_VERSION}\ncollapseChangelog: false\n`,
+				);
 
 				const proc = Bun.spawn(
 					["timeout", "6s", "script", "-q", "-c", `bun ${JSON.stringify(cliEntry)}`, "/dev/null"],

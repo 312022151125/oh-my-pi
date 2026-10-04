@@ -22,6 +22,7 @@ import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { getAgentDbPath, getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
 import * as fileLock from "@oh-my-pi/pi-utils/file-lock";
 import { YAML } from "bun";
+import { scrubEnv } from "./helpers/env-scrub";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
 import {
 	cfgSymbolPreset,
@@ -115,8 +116,18 @@ describe("Settings", () => {
 	let agentDir: string;
 	let projectDir: string;
 
+	// Env bindings outrank every settings layer, so a machine-wide
+	// `HINDSIGHT_BANK_ID` would mask the migrated value these tests assert on.
+	let restoreScrubbedEnv: (() => void) | undefined;
+
 	beforeEach(() => {
 		settingsState = beginSettingsTest();
+		restoreScrubbedEnv = scrubEnv([
+			"HINDSIGHT_API_URL",
+			"HINDSIGHT_API_TOKEN",
+			"HINDSIGHT_BANK_ID",
+			"HINDSIGHT_SCOPING",
+		]);
 
 		// Use TempDir for Windows-safe cleanup (retries on EBUSY from SQLite
 		// file handle release delays).
@@ -152,6 +163,8 @@ describe("Settings", () => {
 		AgentStorage.close();
 		restoreSettingsTestState(settingsState);
 		settingsState = undefined;
+		restoreScrubbedEnv?.();
+		restoreScrubbedEnv = undefined;
 		await Bun.sleep(0);
 		await tempDir?.remove();
 	});

@@ -7,7 +7,7 @@
  * `vi.spyOn(HindsightApi.prototype, ...)` per AGENTS.md.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
@@ -27,6 +27,25 @@ import {
 	cfgHindsightRetainMission,
 	cfgHindsightScoping,
 } from "@oh-my-pi/pi-coding-agent/hindsight/settings";
+
+import { scrubEnv } from "./helpers/env-scrub";
+
+// `HINDSIGHT_BANK_ID` and friends outrank every settings layer, so a machine-wide
+// export would decide the bank ids and scoping these tests assert on.
+const restoreScrubbedEnv = scrubEnv([
+	"HINDSIGHT_API_URL",
+	"HINDSIGHT_API_TOKEN",
+	"HINDSIGHT_BANK_ID",
+	"HINDSIGHT_SCOPING",
+	"HINDSIGHT_BANK_MISSION",
+	"HINDSIGHT_AUTO_RECALL",
+	"HINDSIGHT_AUTO_RETAIN",
+	"HINDSIGHT_RETAIN_MODE",
+]);
+
+afterAll(() => {
+	restoreScrubbedEnv();
+});
 
 interface FakeSessionDeps {
 	sessionId: string | null;
