@@ -747,9 +747,7 @@ describe("Composer prepaint", () => {
 		// A bare `waitForRender()` only yields one tick plus a 40ms sleep, so under
 		// CPU contention the quiet-mode redraw can still be pending when the
 		// viewport is read. Wait for the banner to actually disappear instead.
-		await terminal.waitForRender(
-			() => !terminal.getViewport().some(row => Bun.stripANSI(row).includes("v9.9.9")),
-		);
+		await terminal.waitForRender(() => !terminal.getViewport().some(row => Bun.stripANSI(row).includes("v9.9.9")));
 
 		const output = terminal
 			.getViewport()
