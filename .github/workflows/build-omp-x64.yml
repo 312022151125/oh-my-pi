@@ -53,11 +53,22 @@ jobs:
 
       # Build native .node files directly.
       # Không phụ thuộc artifact từ job khác.
+      - id: cache
+        uses: ./.github/actions/bazel-cache
+
       - name: Build native addons
-        uses: ./.github/actions/bazel-natives
-        with:
-          targets: ${{ matrix.native_targets }}
-          cache-scope: build-${{ matrix.target }}
+        shell: bash
+        env:
+          OMP_BAZEL_RC: ${{ steps.cache.outputs.rc }}
+          NATIVE_TARGETS: ${{ matrix.native_targets }}
+        run: |
+          set -euo pipefail
+          # Raise-only fd guard: huge toolchain input trees exhaust low soft
+          # limits during sandbox setup. Runs in the step that launches the
+          # bazel server (limits are per-process and the server persists).
+          if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
+          read -r -a targets <<< "$NATIVE_TARGETS"
+          bun scripts/bazel-natives.ts "${targets[@]}" --dest packages/natives/native
 
       - name: Build ${{ matrix.target }}
         env:
