@@ -128,13 +128,16 @@ describe("opencode session token formatter", () => {
 		expect(token).toMatch(OPENCODE_SESSION_TOKEN_PATTERN);
 	});
 
-	it("is deterministic so routing and prompt cache survive across turns", () => {
+	it("is stable per conversation so routing and prompt-cache affinity survive across turns", () => {
+		// Cache guarantees same-process stability; two distinct sessions differ.
 		expect(toOpenCodeSessionToken("session-1")).toBe(toOpenCodeSessionToken("session-1"));
 		expect(toOpenCodeSessionToken("session-2")).not.toBe(toOpenCodeSessionToken("session-1"));
 	});
 
-	it("keeps the alphanumeric tail free of lowercase hex collision ambiguity", () => {
-		// Tail must satisfy [0-9A-Za-z]{14} after the fixed 12-hex head.
+	it("uses a clock-minted hex prefix so Zen's client-identity check passes", () => {
+		// Zen decodes the 12-hex head as an inverted millisecond timestamp; a
+		// digest-derived head is rejected with 403 FreeTierError (issue #68).
+		// The minted prefix must be lowercase hex and the tail alphanumeric.
 		const token = toOpenCodeSessionToken("session-1");
 		const head = token.slice(4, 16);
 		const tail = token.slice(16);
