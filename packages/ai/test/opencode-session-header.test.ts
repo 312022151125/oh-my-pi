@@ -128,6 +128,13 @@ describe("opencode session token formatter", () => {
 		expect(token).toMatch(OPENCODE_SESSION_TOKEN_PATTERN);
 	});
 
+	it("passes through a value that already carries a canonical ses_ token", () => {
+		// Upstream prompt-cache affinity is preserved when the caller already
+		// holds an official OpenCode session (e.g. forwarded from the client).
+		const canonical = "ses_ecc411c3affe0A1B2C3D4E5F";
+		expect(toOpenCodeSessionToken(canonical)).toBe(canonical);
+	});
+
 	it("is stable per conversation so routing and prompt-cache affinity survive across turns", () => {
 		// Cache guarantees same-process stability; two distinct sessions differ.
 		expect(toOpenCodeSessionToken("session-1")).toBe(toOpenCodeSessionToken("session-1"));
@@ -137,7 +144,7 @@ describe("opencode session token formatter", () => {
 	it("uses a clock-minted hex prefix so Zen's client-identity check passes", () => {
 		// Zen decodes the 12-hex head as an inverted millisecond timestamp; a
 		// digest-derived head is rejected with 403 FreeTierError (issue #68).
-		// The minted prefix must be lowercase hex and the tail alphanumeric.
+		// The head must be lowercase hex and the tail true base-62 (0-9A-Za-z).
 		const token = toOpenCodeSessionToken("session-1");
 		const head = token.slice(4, 16);
 		const tail = token.slice(16);
