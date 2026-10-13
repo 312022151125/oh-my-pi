@@ -20,46 +20,37 @@ export function isOpenCodeProvider(provider: string): boolean {
 }
 
 /**
- * The gate additionally requires at least two of these OpenCode core tool
- * NAMES in `tools[]` (schemas are ignored, extra non-OpenCode tools are fine,
- * and the count is over distinct names). The check was weakened from all five
- * to any two ([#12306](https://github.com/can1357/oh-my-pi/issues/12306)).
- * Agent harnesses carrying a normal tool roster satisfy this natively;
- * tool-less auxiliary calls must pad.
+ * The gate requires all five of these OpenCode core tool NAMES in `tools[]`
+ * (schemas are ignored, extra non-OpenCode tools are fine, and the count is
+ * over distinct names). Agent harnesses carrying a normal tool roster satisfy
+ * this natively; tool-less and partial-roster calls (e.g. advisor with only
+ * `advise`) must pad.
  */
 export const OPENCODE_GATE_TOOL_NAMES = ["bash", "edit", "glob", "grep", "read"] as const;
 
 /** Minimum distinct gate tool names the gateway requires in `tools[]`. */
-export const OPENCODE_GATE_MIN_TOOL_NAMES = 2;
-
-/**
- * Gate tool names injected when padding. Any two of the five satisfy the
- * gate; `bash` + `read` are the pair the live-gateway bisection confirmed.
- */
-export const OPENCODE_GATE_PAD_TOOL_NAMES = ["bash", "read"] as const;
+export const OPENCODE_GATE_MIN_TOOL_NAMES = 5;
 
 /**
  * Gate tool names missing from `names` (exact-match — the gate compares names
- * only). Returns empty when at least {@link OPENCODE_GATE_MIN_TOOL_NAMES} of
- * the five are already present; otherwise returns the `bash`/`read` names not
- * already present, i.e. just enough stubs to reach the two-name threshold.
+ * only). Returns empty when all five gate names are already present; otherwise
+ * returns every gate name not yet in the roster so the caller can pad to the
+ * full set.
  */
 export function missingOpenCodeGateToolNames(names: Iterable<string>): string[] {
 	const present = new Set(names);
-	const presentCount = OPENCODE_GATE_TOOL_NAMES.filter(name => present.has(name)).length;
-	if (presentCount >= OPENCODE_GATE_MIN_TOOL_NAMES) return [];
-	return OPENCODE_GATE_PAD_TOOL_NAMES.filter(name => !present.has(name));
+	return OPENCODE_GATE_TOOL_NAMES.filter(name => !present.has(name));
 }
 
 /**
- * Pad `tools` with the gate-required OpenCode tool names so tool-less auxiliary
- * calls (advisors, one-shot helpers) pass the body check. Pads carry no
- * parameters and an empty description — the gate ignores schemas — but callers
- * MUST keep them out of the agent loop's tool registry: they are wire-shape
- * filler, not executable work (the roster should never offer "bash" to a call
- * that was built without tools).
+ * Pad `tools` with all missing gate-required OpenCode tool names so every call
+ * (tool-less helpers, advisors carrying only `advise`, partial rosters) passes
+ * the body check. Pads carry no parameters and an empty description — the gate
+ * ignores schemas — but callers MUST keep them out of the agent loop's tool
+ * registry: they are wire-shape filler, not executable work.
  *
- * Returns the input array unchanged (same identity) when nothing is missing.
+ * Returns the input array unchanged (same identity) when all five gate names
+ * are already present.
  */
 export function withOpenCodeGateTools<T extends { name: string }>(tools: readonly T[] | undefined): T[] {
 	const existing = tools ?? [];

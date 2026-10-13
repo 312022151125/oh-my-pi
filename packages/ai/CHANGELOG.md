@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenCode Zen/Go gate rejection (403 FreeTierError) for advisor and other partial-roster requests: the gate requires all five core tool names (`bash`, `edit`, `glob`, `grep`, `read`) in `tools[]`, not just two; requests carrying only non-gate tools such as `advise` now receive the full five-name stub pad instead of the previous `bash`+`read` pair.
+
 ### Removed
 
 - Removed the `toolNamespacesInfo` stream option; Codex requests no longer send `tool_namespaces_info` turn metadata, and `code_mode_tool_names`/`tool_namespaces_info` are no longer reserved client metadata keys.

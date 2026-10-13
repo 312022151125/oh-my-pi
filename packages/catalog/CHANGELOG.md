@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `withOpenCodeGateTools`: raised the gate threshold from 2 to 5 and pad with all missing tool names so advisor requests (carrying only `advise`) now include the full five-name roster the gateway requires.
+
 ### Added
 
 - Added the `classifier-cot-extraction` rule axis, set for Claude, marking models whose classifier refuses earlier reasoning quoted back into their input ([#15436](https://github.com/can1357/oh-my-pi/pull/15436) by [@will-bogusz](https://github.com/will-bogusz))

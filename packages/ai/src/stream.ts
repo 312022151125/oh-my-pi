@@ -911,17 +911,17 @@ function streamDispatch<TApi extends Api>(
 		withTransportFetch(model, (options || {}) as StreamOptions),
 	) as OptionsForApi<TApi>;
 	assertExplicitOpenAIResponsesPromptCacheSupport(model, requestOptions);
-	// OpenCode's gate requires at least two OpenCode core tool names in
-	// tools[] (schemas ignored) on every request, so tool-less auxiliary calls
-	// (advisors, one-shot helpers) are refused with 403 FreeTierError even when
-	// the client-identity headers are correct (#12306). Pad with stub entries
-	// here — the single dispatch funnel for stream/complete/streamSimple — and
-	// never expose them to the caller's tool registry: they are wire-shape
-	// filler, not executable work. A padded tool-less call additionally pins
-	// toolChoice to "none" (unless the caller set one): the caller expects text
-	// and has no exec handler, so a phantom call to a stub would surface as
-	// empty text. The gate reads tools[], not tool_choice, so the pin is
-	// gate-neutral.
+	// OpenCode's gate requires all five core tool names in tools[] (schemas
+	// ignored) on every request, so tool-less and partial-roster calls
+	// (advisors carrying only `advise`, one-shot helpers) are refused with 403
+	// FreeTierError even when the client-identity headers are correct (#12306).
+	// Pad with stub entries here — the single dispatch funnel for
+	// stream/complete/streamSimple — and never expose them to the caller's tool
+	// registry: they are wire-shape filler, not executable work. A padded
+	// tool-less call (empty original roster) additionally pins toolChoice to
+	// "none" (unless the caller set one): the caller expects text and has no
+	// exec handler, so a phantom call to a stub would surface as empty text.
+	// The gate reads tools[], not tool_choice, so the pin is gate-neutral.
 	if (isOpenCodeProvider(model.provider)) {
 		const originalTools = context.tools;
 		const paddedTools = withOpenCodeGateTools(originalTools);
