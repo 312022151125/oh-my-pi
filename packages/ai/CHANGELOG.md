@@ -6,6 +6,9 @@
 
 - Fixed OpenCode Zen/Go gate rejection (403 FreeTierError) for advisor and other partial-roster requests: the gate requires all five core tool names (`bash`, `edit`, `glob`, `grep`, `read`) in `tools[]`, not just two; requests carrying only non-gate tools such as `advise` now receive the full five-name stub pad instead of the previous `bash`+`read` pair.
 - Fixed parallel tool calls failing with "Tool call arguments are not valid JSON" on some OpenAI-compatible gateways, such as Gemini ([#15682](https://github.com/can1357/oh-my-pi/pull/15682) by [@Zzz141592653](https://github.com/Zzz141592653))
+- Fixed Anthropic fallback-credit redemption losing its credit on errors that only mention `400` in their text, such as an overload message ([#15702](https://github.com/can1357/oh-my-pi/pull/15702) by [@H4vC](https://github.com/H4vC))
+- Fixed Anthropic fallback-credit redemption sending an extra `fallback-credit-2026-06-01` beta when the refused request used a newer one ([#15702](https://github.com/can1357/oh-my-pi/pull/15702) by [@H4vC](https://github.com/H4vC))
+- Fixed Anthropic fallback-credit redemptions failing when the refused turn included unsigned thinking ([#15702](https://github.com/can1357/oh-my-pi/pull/15702) by [@H4vC](https://github.com/H4vC))
 
 ## [18.10.4] - 2026-10-13
 
