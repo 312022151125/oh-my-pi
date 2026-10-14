@@ -5,6 +5,8 @@
 ### Fixed
 
 - Fixed OpenCode Zen/Go gate rejection (403 FreeTierError) for advisor and other partial-roster requests: the gate requires all five core tool names (`bash`, `edit`, `glob`, `grep`, `read`) in `tools[]`, not just two; requests carrying only non-gate tools such as `advise` now receive the full five-name stub pad instead of the previous `bash`+`read` pair.
+- Fixed parallel tool calls failing with "Tool call arguments are not valid JSON" on some OpenAI-compatible gateways, such as Gemini ([#15682](https://github.com/can1357/oh-my-pi/pull/15682) by [@Zzz141592653](https://github.com/Zzz141592653))
+
 ## [18.10.4] - 2026-10-13
 
 ### Fixed
