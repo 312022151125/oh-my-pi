@@ -131,7 +131,7 @@ describe("opencode session token formatter", () => {
 	it("passes through a value that already carries a canonical ses_ token", () => {
 		// Upstream prompt-cache affinity is preserved when the caller already
 		// holds an official OpenCode session (e.g. forwarded from the client).
-		const canonical = "ses_ecc411c3affe0A1B2C3D4E5F";
+		const canonical = "ses_ecc411c3affe0A1B2C3D4E5FG7";
 		expect(toOpenCodeSessionToken(canonical)).toBe(canonical);
 	});
 
